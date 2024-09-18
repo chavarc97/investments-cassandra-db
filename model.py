@@ -254,3 +254,129 @@ def bulk_insert(session):
     execute_batch(session, tastd_stmt, data)
     execute_batch(session, tasd_stmt, data)
     
+# <-------------------------------- 
+
+
+def random_date(start_date, end_date):
+    time_between_dates = end_date - start_date
+    days_between_dates = time_between_dates.days
+    random_number_of_days = random.randrange(days_between_dates)
+    rand_date = start_date + datetime.timedelta(days=random_number_of_days)
+    return time_uuid.TimeUUID.with_timestamp(time_uuid.mkutime(rand_date))
+
+def create_keyspace(session, keyspace, replication_factor):
+    log.info(f"Creating keyspace: {keyspace} with replication factor {replication_factor}")
+    session.execute(CREATE_KEYSPACE.format(keyspace, replication_factor))
+    
+def create_schema(session):
+    log.info("Creating model schema")
+    session.execute(CREATE_USERS_TABLE)
+    session.execute(CREATE_POSSITIONS_BY_ACCOUNT_TABLE)
+    session.execute(CREATE_TRADES_BY_ACCOUNT_DATE_TABLE)
+    session.execute(CREATE_TRADES_BY_ACCOUNT_TD_TABLE)
+    session.execute(CREATE_TABLE_BY_ACCOUNT_STD_TABLE)
+    session.execute(CREATE_TABLE_BY_ACCOUNT_SD_TABLE)
+    
+
+def show_symbols():
+    print("Available symbols: ")
+    for sym in INSTRUMENTS:
+        print("- ", sym)
+
+
+# Function to execute the queries
+def get_user_accounts(session, username):
+    log.info(f"Retrieving {username} accounts")
+    stmt = session.prepare(SELECT_USER_ACCOUNTS)
+    rows = session.execute(stmt, [username])
+    for row in rows:
+        print(f"=== Account: {row.account_number} ===")
+        print(f"- Cash Balance: {row.cash_balance}")
+        
+def get_positions_by_account(session, account):
+    log.info(f"Retrieving positions for account: {account}")
+    stmt = session.prepare(SELECT_POSITIONS_BY_ACCOUNT)
+    rows = session.execute(stmt, [account])
+    for row in rows:
+        print(f"- {row.symbol}: {row.quantity}")
+        
+def get_trades_by_account_Q3(session, account):
+    log.info(f"Retrieving trades for account: {account}")
+    stmt = session.prepare(SELECT_TRADES_BY_ACOUNT_QUERY)
+    type = str(input("Select a trade type (buy/sell): "))
+    start_date = input("Enter start date (YYYY-MM-DD): ")
+    end_date = input("Enter end date (YYYY-MM-DD): ")
+    print("available symbols: ")
+    show_symbols()
+    symbol = str(input("Select a symbol: "))
+    rows = session.execute(stmt, [account, start_date, end_date, type, symbol])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+        
+
+def get_trades_a_d(session, account):
+    log.info(f"Retrieving trades for account: {account} by date")
+    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE)
+    rows = session.execute(stmt, [account])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+
+
+def get_trades_a_d_range(session, account):
+    log.info(f"Retrieving trades for account: {account} by date range")
+    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE_RANGE)
+    start_date = input("Enter start date (YYYY-MM-DD): ")
+    end_date = input("Enter end date (YYYY-MM-DD): ")
+    rows = session.execute(stmt, [account, start_date, end_date])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+        
+
+def get_trades_a_d_range_type(session, account):
+    log.info(f"Retrieving trades for account: {account} by date range and type")
+    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE_RANGE_TYPE)
+    type = str(input("Select a trade type (buy/sell): "))
+    start_date = input("Enter start date (YYYY-MM-DD): ")
+    end_date = input("Enter end date (YYYY-MM-DD): ")
+    rows = session.execute(stmt, [account, type, start_date, end_date])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+        
+
+def get_trades_a_std(session, account):
+    log.info(f"Retrieving trades for account: {account} by date, type and symbol")
+    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_STD)
+    type = str(input("Select a trade type (buy/sell): "))
+    start_date = input("Enter start date (YYYY-MM-DD): ")
+    end_date = input("Enter end date (YYYY-MM-DD): ")
+    print("available symbols: ")
+    show_symbols()
+    symbol = str(input("Select a symbol: "))
+    rows = session.execute(stmt, [account, start_date, end_date, type, symbol])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+        
+        
+def get_trades_a_sd(session, account):
+    log.info(f"Retrieving trades for account: {account} by date and symbol")
+    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_SD)
+    start_date = input("Enter start date (YYYY-MM-DD): ")
+    end_date = input("Enter end date (YYYY-MM-DD): ")
+    show_symbols()
+    symbol = str(input("Select a symbol: "))
+    rows = session.execute(stmt, [account, start_date, end_date, symbol])
+    for row in rows:
+        print(f"""//{row.trade_id}________________________________________________________________
+                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
+        print("____________________________________________________________________________________")
+        
