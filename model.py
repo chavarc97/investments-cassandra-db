@@ -6,6 +6,8 @@ import uuid
 
 import time_uuid
 from cassandra.query import BatchStatement
+from decimal import Decimal
+from tabulate import tabulate
 
 # Set logger
 log = logging.getLogger()
@@ -57,16 +59,17 @@ CREATE_TRADES_BY_ACCOUNT_DATE_TABLE = """
 #   NEW TABLES HERE --------------------------->
 CREATE_TRADES_BY_ACCOUNT_TD_TABLE = """ 
     CREATE TABLE IF NOT EXISTS trades_by_a_td (
-            account TEXT,
-            trade_id TIMEUUID,
-            type TEXT,
-            symbol TEXT,
-            shares DECIMAL,
-            price DECIMAL,
-            amount DECIMAL,
-            PRIMARY KEY ((account), type, trade_id)
-        ) WITH CLUSTERING ORDER BY (trade_id DESC)
-    """
+        account TEXT,
+        type TEXT,
+        trade_id TIMEUUID,
+        symbol TEXT,
+        shares DECIMAL,
+        price DECIMAL,
+        amount DECIMAL,
+        PRIMARY KEY ((account), type, trade_id)
+    ) WITH CLUSTERING ORDER BY (type ASC,trade_id DESC);
+"""
+    
 CREATE_TABLE_BY_ACCOUNT_STD_TABLE = """
     CREATE TABLE IF NOT EXISTS trades_by_a_std (
         account TEXT,
@@ -76,8 +79,8 @@ CREATE_TABLE_BY_ACCOUNT_STD_TABLE = """
         shares DECIMAL,
         price DECIMAL,
         amount DECIMAL,
-        PRIMARY KEY ((account), trade_id, type, symbol)
-    ) WITH CLUSTERING ORDER BY (trade_id DESC)
+        PRIMARY KEY ((account), type, symbol, trade_id)
+    ) WITH CLUSTERING ORDER BY (type ASC, symbol ASC, trade_id DESC)
 """
 
 CREATE_TABLE_BY_ACCOUNT_SD_TABLE = """ 
@@ -89,8 +92,8 @@ CREATE_TABLE_BY_ACCOUNT_SD_TABLE = """
         shares DECIMAL,
         price DECIMAL,
         amount DECIMAL,
-        PRIMARY KEY ((account), trade_id, symbol)
-    ) WITH CLUSTERING ORDER BY (trade_id DESC)
+        PRIMARY KEY ((account), symbol, trade_id)
+    ) WITH CLUSTERING ORDER BY (symbol ASC, trade_id DESC)
 """
 
 # <--------------------------------
@@ -109,64 +112,55 @@ SELECT_USER_ACCOUNTS = """
 SELECT_POSITIONS_BY_ACCOUNT = """ 
     SELECT symbol, quantity FROM positions_by_account 
     WHERE account = ?
-    ORDER BY symbol ASC;
 """
+
 # Find all trades for an account, with optional date range, 
-# transaction type, and stock symbol, ordered by trade date (DESC)
-# Q3
-SELECT_TRADES_BY_ACOUNT_QUERY = """ 
-    SELECT * FROM trades_by_a_d
+# Query 1
+SELECT_TRADES_BY_ACCOUNT_DATE = """
+    SELECT toDate(trade_id), type, symbol, shares, price, amount 
+    FROM trades_by_a_d WHERE account = ? 
+    ORDER BY trade_id DESC
+    LIMIT 10
+"""
+
+# Qeury 1.1
+SELECT_TRADES_BY_ACCOUNT_DATE_RANGE = """
+    SELECT toDate(trade_id) as trade_date, type, symbol, shares, price, amount 
+    FROM trades_by_a_d
     WHERE account = ?
-    AND trade_id >= minTimeuuid(?)
-    AND trade_id <= maxTimeuuid(?)
+    AND toTimestamp(trade_id) >= toTimestamp(now()) - 2592000000  
+    AND toTimestamp(trade_id) <= toTimestamp(now())
+"""
+
+# "Trades by type (Buy or Sell). (Optional date range. Defaults to latest 30 days)",
+# Query 2
+SELECT_TRADES_BY_ACCOUNT_DATE_RANGE_TYPE = """
+    SELECT toDate(trade_id), type, symbol, shares, price, amount
+    FROM trades_by_a_td 
+    WHERE account = ? 
     AND type = ?
-    AND symbol = ?
-    ORDER BY trade_id DESC;
+    LIMIT 10
 """
 
 # find all trades in an account, transaction type and symbol, ordered by trade_id
-# Q3.1
-SELECT_TRADES_BY_ACCOUNT_DATE = """
-    SELECT * FROM trades_by_a_d WHERE account = ? 
-    ORDER BY trade_id DESC;
-"""
-# Q3.2
-SELECT_TRADES_BY_ACCOUNT_DATE_RANGE = """
-    SELECT * FROM trades_by_a_d
-    WHERE account = ?
-    AND trade_id >= minTimeuuid(?)
-    AND trade_id <= maxTimeuuid(?)
-    ORDER BY trade_id DESC;
-"""
-# Q3.3
-SELECT_TRADES_BY_ACCOUNT_DATE_RANGE_TYPE = """
-    SELECT * FROM trades_by_a_td
-    WHERE account = ?
-    AND type = ?
-    AND trade_id >= minTimeuuid(?)
-    AND trade_id <= maxTimeuuid(?)
-    ORDER BY trade_id DESC;
-"""
-
-# Q3.4
+# Query 3
 SELECT_TRADES_BY_ACCOUNT_STD = """
-    SELECT * FROM trades_by_a_std
+    SELECT toDate(trade_id) as trade_date, type, symbol, shares, price, amount 
+    FROM trades_by_a_std
     WHERE account = ?
-    AND trade_id >= minTimeuuid(?)
-    AND trade_id <= maxTimeuuid(?)
     AND type = ?
     AND symbol = ?
-    ORDER BY trade_id DESC;
+    LIMIT 10
 """
 
-# Q3.5
+# "Trades by symbol. (Optional date range. Defaults to latest 30 days)"
+# Query 4
 SELECT_TRADES_BY_ACCOUNT_SD = """
-    SELECT * FROM trades_by_a_sd
+    SELECT toDate(trade_id) as trade_date, type, symbol, shares, price, amount 
+    FROM trades_by_a_sd
     WHERE account = ?
-    AND trade_id >= minTimeuuid(?)
-    AND trade_id <= maxTimeuuid(?)
     AND symbol = ?
-    ORDER BY trade_id DESC;
+    LIMIT 10
 """
 # <--------------------------------
 
@@ -219,7 +213,7 @@ def bulk_insert(session):
         user = random.choice(USERS)
         account_number = str(uuid.uuid4())
         accounts.append(account_number)
-        cash_balance = round(random.uniform(0.1, 100000.0), 2)
+        cash_balance = Decimal(random.uniform(1000.0, 100000.0)).quantize(Decimal('0.01'))
         data.append((user[0], account_number, cash_balance, user[1]))
     execute_batch(session, acc_stmt, data)
     
@@ -246,15 +240,13 @@ def bulk_insert(session):
         sym = random.choice(INSTRUMENTS)
         trade_type = random.choice(['buy', 'sell'])
         shares = random.randint(1, 5000)
-        price = round(random.uniform(0.1, 100000.0), 2)
+        price = Decimal(random.uniform(1000.0, 100000.0)).quantize(Decimal('0.01'))
         amount = shares * price
         data.append((acc, trade_id, trade_type, sym, shares, price, amount))
     execute_batch(session, tad_stmt, data)
     execute_batch(session, tatd_stmt, data)
     execute_batch(session, tastd_stmt, data)
     execute_batch(session, tasd_stmt, data)
-    
-# <-------------------------------- 
 
 
 def random_date(start_date, end_date):
@@ -264,9 +256,11 @@ def random_date(start_date, end_date):
     rand_date = start_date + datetime.timedelta(days=random_number_of_days)
     return time_uuid.TimeUUID.with_timestamp(time_uuid.mkutime(rand_date))
 
+
 def create_keyspace(session, keyspace, replication_factor):
     log.info(f"Creating keyspace: {keyspace} with replication factor {replication_factor}")
     session.execute(CREATE_KEYSPACE.format(keyspace, replication_factor))
+   
     
 def create_schema(session):
     log.info("Creating model schema")
@@ -285,98 +279,128 @@ def show_symbols():
 
 
 # Function to execute the queries
-def get_user_accounts(session, username):
+"""
+This function executes the queries to retrieve the accounts and store them in a list.
+"""
+def get_accounts(session, username, accounts = []):
     log.info(f"Retrieving {username} accounts")
     stmt = session.prepare(SELECT_USER_ACCOUNTS)
     rows = session.execute(stmt, [username])
     for row in rows:
-        print(f"=== Account: {row.account_number} ===")
-        print(f"- Cash Balance: {row.cash_balance}")
+        accounts.append(row.account_number)
+    return accounts
+
+
+def get_user_accounts(session, username):
+    log.info(f"Retrieving {username} accounts")
+    stmt = session.prepare(SELECT_USER_ACCOUNTS)
+    rows = session.execute(stmt, [username])
+    rows_list = list(rows)
+    formatted_rows = [
+        (row.account_number, row.name, row.cash_balance)
+        for row in rows_list
+    ]
+    headers = ["Account Number", "Name", "Cash Balance"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)
+        
         
 def get_positions_by_account(session, account):
     log.info(f"Retrieving positions for account: {account}")
     stmt = session.prepare(SELECT_POSITIONS_BY_ACCOUNT)
     rows = session.execute(stmt, [account])
-    for row in rows:
-        print(f"- {row.symbol}: {row.quantity}")
-        
-def get_trades_by_account_Q3(session, account):
-    log.info(f"Retrieving trades for account: {account}")
-    stmt = session.prepare(SELECT_TRADES_BY_ACOUNT_QUERY)
-    type = str(input("Select a trade type (buy/sell): "))
-    start_date = input("Enter start date (YYYY-MM-DD): ")
-    end_date = input("Enter end date (YYYY-MM-DD): ")
-    print("available symbols: ")
-    show_symbols()
-    symbol = str(input("Select a symbol: "))
-    rows = session.execute(stmt, [account, start_date, end_date, type, symbol])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
+    rows_list = list(rows)
+    formatted_rows = [
+        (row.symbol, row.quantity)
+        for row in rows_list
+    ]
+    headers = ["Symbol", "Quantity"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)
         
 
 def get_trades_a_d(session, account):
     log.info(f"Retrieving trades for account: {account} by date")
     stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE)
     rows = session.execute(stmt, [account])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
-
-
-def get_trades_a_d_range(session, account):
-    log.info(f"Retrieving trades for account: {account} by date range")
-    stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE_RANGE)
-    start_date = input("Enter start date (YYYY-MM-DD): ")
-    end_date = input("Enter end date (YYYY-MM-DD): ")
-    rows = session.execute(stmt, [account, start_date, end_date])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
+     # Convert rows to a list to make sure we can iterate over them
+    rows_list = list(rows)
+    formatted_rows = [
+        (
+            row[0],  # Access the first column (toDate(trade_id))
+            row.type, 
+            row.symbol, 
+            row.shares, 
+            f"{float(row.price):,.2f}",  # Convert Decimal to float and format
+            f"{float(row.amount):,.2f}"  # Convert Decimal to float and format
+        )
+        for row in rows_list
+    ]
+    headers = ["Trade Date", "Type", "Symbol", "Shares", "Price", "Amount"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)     
         
 
-def get_trades_a_d_range_type(session, account):
+def get_trades_a_d_range_type(session, account, type, start_date=None, end_date=None):
     log.info(f"Retrieving trades for account: {account} by date range and type")
     stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_DATE_RANGE_TYPE)
-    type = str(input("Select a trade type (buy/sell): "))
-    start_date = input("Enter start date (YYYY-MM-DD): ")
-    end_date = input("Enter end date (YYYY-MM-DD): ")
-    rows = session.execute(stmt, [account, type, start_date, end_date])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
+    rows = session.execute(stmt, [account, type])
+     # Convert rows to a list to make sure we can iterate over them
+    rows_list = list(rows)
+    formatted_rows = [
+        (
+            row[0],  # Access the first column (toDate(trade_id))
+            row.type, 
+            row.symbol, 
+            row.shares, 
+            f"{float(row.price):,.2f}",  # Convert Decimal to float and format
+            f"{float(row.amount):,.2f}"  # Convert Decimal to float and format
+        )
+        for row in rows_list
+    ]
+    headers = ["Trade Date", "Type", "Symbol", "Shares", "Price", "Amount"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)
         
 
-def get_trades_a_std(session, account):
+def get_trades_a_std(session, account, t_type, t_symbol):
     log.info(f"Retrieving trades for account: {account} by date, type and symbol")
     stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_STD)
-    type = str(input("Select a trade type (buy/sell): "))
-    start_date = input("Enter start date (YYYY-MM-DD): ")
-    end_date = input("Enter end date (YYYY-MM-DD): ")
-    print("available symbols: ")
-    show_symbols()
-    symbol = str(input("Select a symbol: "))
-    rows = session.execute(stmt, [account, start_date, end_date, type, symbol])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
+    rows = session.execute(stmt, [account, t_type, t_symbol])
+    rows_list = list(rows)
+    formatted_rows = [
+        (
+            row[0],  # Access the first column (toDate(trade_id))
+            row.type, 
+            row.symbol, 
+            row.shares, 
+            f"{float(row.price):,.2f}",  # Convert Decimal to float and format
+            f"{float(row.amount):,.2f}"  # Convert Decimal to float and format
+        )
+        for row in rows_list
+    ]
+    headers = ["Trade Date", "Type", "Symbol", "Shares", "Price", "Amount"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)
         
         
-def get_trades_a_sd(session, account):
+def get_trades_a_sd(session, account, t_symbol):
     log.info(f"Retrieving trades for account: {account} by date and symbol")
     stmt = session.prepare(SELECT_TRADES_BY_ACCOUNT_SD)
-    start_date = input("Enter start date (YYYY-MM-DD): ")
-    end_date = input("Enter end date (YYYY-MM-DD): ")
-    show_symbols()
-    symbol = str(input("Select a symbol: "))
-    rows = session.execute(stmt, [account, start_date, end_date, symbol])
-    for row in rows:
-        print(f"""//{row.trade_id}________________________________________________________________
-                     {row.type} || {row.symbol} || {row.shares} || {row.price} || {row.amount}""")
-        print("____________________________________________________________________________________")
+    rows = session.execute(stmt, [account, t_symbol])
+    rows_list = list(rows)
+    formatted_rows = [
+        (
+            row[0],  # Access the first column (toDate(trade_id))
+            row.type, 
+            row.symbol, 
+            row.shares, 
+            f"{float(row.price):,.2f}",  # Convert Decimal to float and format
+            f"{float(row.amount):,.2f}"  # Convert Decimal to float and format
+        )
+        for row in rows_list
+    ]
+    headers = ["Trade Date", "Type", "Symbol", "Shares", "Price", "Amount"]
+    table = tabulate(formatted_rows, headers= headers, tablefmt="pretty")
+    print(table)
         
